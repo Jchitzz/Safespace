@@ -1,6 +1,8 @@
 (function () {
   const socket = io();
   const CONSENT_KEY = 'safespace_consent_v1';
+  const LISTENER_PRIMER_KEY = 'safespace_listener_primer_seen';
+  const THEME_KEY = 'safespace_theme';
 
   function hasConsented() {
     try { return !!localStorage.getItem(CONSENT_KEY); } catch (e) { return false; }
@@ -8,6 +10,45 @@
   function recordConsent() {
     try { localStorage.setItem(CONSENT_KEY, '1'); } catch (e) { /* private browsing etc. — non-fatal */ }
   }
+  function hasSeenListenerPrimer() {
+    try { return !!localStorage.getItem(LISTENER_PRIMER_KEY); } catch (e) { return false; }
+  }
+  function recordListenerPrimerSeen() {
+    try { localStorage.setItem(LISTENER_PRIMER_KEY, '1'); } catch (e) { /* non-fatal */ }
+  }
+
+  // ---------------- THEME TOGGLE ----------------
+  // Lives outside the #app tree (appended straight to <body>) so it survives
+  // every render() wiping and rebuilding #app's contents.
+  function getStoredTheme() {
+    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch (e) { return 'dark'; }
+  }
+  function setStoredTheme(theme) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* non-fatal */ }
+  }
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  }
+  let currentTheme = getStoredTheme();
+  applyTheme(currentTheme);
+
+  function createThemeToggle() {
+    const btn = document.createElement('button');
+    btn.className = 'theme-toggle';
+    btn.setAttribute('aria-label', 'Switch to ' + (currentTheme === 'light' ? 'dark' : 'light') + ' theme');
+    btn.setAttribute('aria-pressed', String(currentTheme === 'light'));
+    btn.textContent = currentTheme === 'light' ? '☾' : '☀';
+    btn.addEventListener('click', () => {
+      currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+      applyTheme(currentTheme);
+      setStoredTheme(currentTheme);
+      btn.textContent = currentTheme === 'light' ? '☾' : '☀';
+      btn.setAttribute('aria-label', 'Switch to ' + (currentTheme === 'light' ? 'dark' : 'light') + ' theme');
+      btn.setAttribute('aria-pressed', String(currentTheme === 'light'));
+    });
+    document.body.appendChild(btn);
+  }
+  createThemeToggle();
 
   let state = {
     screen: 'home',
@@ -21,6 +62,14 @@
     partnerTyping: false,
     queueCounts: { venter: 0, listener: 0, flexible: 0 },
     consentGiven: hasConsented(),
+    listenerPrimerOpen: false,
+    pendingRole: null,
+    conversationCount: 0,
+    communityNotes: [],
+    currentQuote: null,
+    quoteFinalized: false,
+    noteStatus: '',
+    noteSubmitting: false,
   };
   let tickInterval = null;
   let typingTimeout = null;
@@ -31,6 +80,41 @@
     if (state.screen === 'landing') render();
   });
 
+  socket.on('home_stats', ({ conversationCount, communityNotes }) => {
+    state.conversationCount = conversationCount;
+    state.communityNotes = communityNotes || [];
+    if (!state.quoteFinalized) {
+      // One-time re-roll across the combined static+community pool, so a
+      // community note has a chance to show even on the very first load
+      // (before this event has arrived, only static quotes were possible).
+      state.currentQuote = pickQuoteFromPool();
+      state.quoteFinalized = true;
+    }
+    if (state.screen === 'home') render();
+  });
+
+  socket.on('note_accepted', () => {
+    state.noteStatus = 'Thanks — added to the wall.';
+    state.noteSubmitting = false;
+    updateNoteWallUI();
+  });
+
+  socket.on('note_rejected', (r) => {
+    state.noteSubmitting = false;
+    if (r.reason === 'crisis') state.noteStatus = r.message;
+    else if (r.reason === 'too_long') state.noteStatus = 'Keep it under 140 characters.';
+    else if (r.reason === 'rate_limited') state.noteStatus = "You've shared a few already — try again later.";
+    else state.noteStatus = 'Write something first.';
+    updateNoteWallUI();
+  });
+
+  function updateNoteWallUI() {
+    const statusEl = document.getElementById('note-wall-status');
+    const btn = document.getElementById('note-wall-submit');
+    if (statusEl) statusEl.textContent = state.noteStatus || '';
+    if (btn) btn.disabled = !!state.noteSubmitting;
+  }
+
   function render() {
     const app = document.getElementById('app');
     app.innerHTML = '';
@@ -38,10 +122,15 @@
     else if (state.screen === 'landing') app.appendChild(renderLanding());
     else if (state.screen === 'waiting') app.appendChild(renderWaiting());
     else if (state.screen === 'chat') app.appendChild(renderChat());
+    else if (state.screen === 'breather') app.appendChild(renderBreather());
     else if (state.screen === 'end') app.appendChild(renderEnd());
     if (state.reportOpen) {
       app.appendChild(renderReportModal());
       setupFocusTrap('report-modal', () => { state.reportOpen = false; render(); });
+    }
+    if (state.listenerPrimerOpen) {
+      app.appendChild(renderListenerPrimerModal());
+      setupFocusTrap('listener-primer-modal', () => { state.listenerPrimerOpen = false; render(); });
     }
     if (!state.consentGiven && state.screen !== 'home') {
       app.appendChild(renderConsentModal());
@@ -93,23 +182,31 @@
     "Connection doesn't require a reason — just a moment.",
     'Two strangers, one honest conversation. That can be enough.',
   ];
-  function pickHomeQuote() {
-    return HOME_QUOTES[Math.floor(Math.random() * HOME_QUOTES.length)];
+  function pickQuoteFromPool() {
+    const pool = HOME_QUOTES.concat(state.communityNotes || []);
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
   // ---------------- HOME ----------------
   function renderHome() {
+    if (!state.currentQuote) state.currentQuote = pickQuoteFromPool();
     return el('div', { class: 'landing home' }, [
       el('div', { class: 'glow' }),
       el('div', { class: 'home-content' }, [
         el('h1', { text: 'safespace' }),
         el('p', { class: 'tagline', text: 'Anonymous peer support, one conversation at a time.' }),
+        el('p', {
+          class: 'convo-counter',
+          text: state.conversationCount > 0
+            ? state.conversationCount.toLocaleString() + ' conversations so far'
+            : 'Be part of the first conversation.',
+        }),
         el('div', { class: 'mission' }, [
           el('h2', { text: 'Why we exist' }),
           el('p', { text: "Everyone has days they need to talk through, and not everyone has someone to call. safespace closes that gap: a place to say what's on your mind to a real person — no names, no history, no accounts." }),
           el('p', { text: "Vent when you need to get something off your chest, or listen when you have room to hold space for someone else. It's not therapy or a substitute for professional care — just somewhere to not feel alone with what you're carrying today." }),
         ]),
-        el('blockquote', { class: 'home-quote', text: pickHomeQuote() }),
+        el('blockquote', { class: 'home-quote', text: state.currentQuote }),
         el('button', { class: 'cta-btn', onclick: () => { state.screen = 'landing'; render(); }, text: 'Start a Conversation' }),
       ]),
       el('p', { class: 'footnote' }, [
@@ -187,10 +284,47 @@
   }
 
   function joinQueue(role) {
+    if (role === 'listener' && !hasSeenListenerPrimer()) {
+      state.pendingRole = role;
+      state.listenerPrimerOpen = true;
+      render();
+      return;
+    }
+    actuallyJoinQueue(role);
+  }
+
+  function actuallyJoinQueue(role) {
     state.role = role;
     state.screen = 'waiting';
     render();
     socket.emit('join_queue', { role });
+  }
+
+  function renderListenerPrimerModal() {
+    const overlay = el('div', { class: 'modal-overlay', id: 'listener-primer-modal', onclick: (e) => { if (e.target === overlay) { state.listenerPrimerOpen = false; render(); } } });
+    const tips = el('ul', { class: 'primer-tips' });
+    [
+      "You don't need to fix anything or offer advice unless they ask for it.",
+      'It\u2019s okay to say "I\u2019m not sure what to say" — presence matters more than the perfect response.',
+      'If something feels beyond you, the crisis banner and report button are always right there.',
+      'You can end the conversation anytime if it doesn\u2019t feel right.',
+    ].forEach((line) => tips.appendChild(el('li', { text: line })));
+    const modal = el('div', { class: 'modal wide', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'primer-title' }, [
+      el('h3', { id: 'primer-title', text: 'A few things before you listen' }),
+      el('p', { text: "You don't need training or credentials — just a willingness to pay attention." }),
+      tips,
+      el('div', { class: 'modal-actions' }, [
+        el('button', {
+          class: 'btn-danger', text: "I'm ready, find someone to talk to", onclick: () => {
+            recordListenerPrimerSeen();
+            state.listenerPrimerOpen = false;
+            actuallyJoinQueue(state.pendingRole || 'listener');
+          },
+        }),
+      ]),
+    ]);
+    overlay.appendChild(modal);
+    return overlay;
   }
 
   function cancelWait() {
@@ -260,9 +394,20 @@
 
   socket.on('session_ended', () => {
     clearInterval(tickInterval);
-    state.screen = 'end';
+    state.noteStatus = '';
+    state.noteSubmitting = false;
+    state.screen = state.role === 'venter' ? 'breather' : 'end';
     render();
   });
+
+  function renderBreather() {
+    return el('div', { class: 'breather' }, [
+      el('div', { class: 'breather-circle', 'aria-hidden': 'true' }),
+      el('h2', { text: 'Take a breath before you go.' }),
+      el('p', { text: 'Whenever you\u2019re ready.' }),
+      el('button', { class: 'again-btn', text: "I'm ready", onclick: () => { state.screen = 'end'; render(); } }),
+    ]);
+  }
 
   socket.on('report_received', () => {
     state.reportOpen = false;
@@ -379,12 +524,48 @@
       }
       box.appendChild(starsWrap);
     }
+
+    const noteInput = el('textarea', {
+      rows: '2', maxlength: '140', placeholder: 'Something kind, one sentence…',
+      'aria-label': 'Optional encouraging note for the community wall',
+    });
+    const noteBtn = el('button', {
+      id: 'note-wall-submit', class: 'btn-ghost', text: 'Share anonymously',
+      onclick: () => {
+        const text = noteInput.value.trim();
+        if (!text) return;
+        state.noteSubmitting = true;
+        updateNoteWallUI();
+        socket.emit('submit_note', { text });
+      },
+    });
+    box.appendChild(el('div', { class: 'note-wall' }, [
+      el('p', { class: 'note-wall-label', text: 'Want to leave an encouraging note for the next stranger? (optional)' }),
+      el('div', { class: 'note-wall-input' }, [noteInput, noteBtn]),
+      el('p', { id: 'note-wall-status', class: 'note-wall-status', 'aria-live': 'polite', text: state.noteStatus || '' }),
+    ]));
+
     box.appendChild(el('button', { class: 'again-btn', text: 'Start a new session', onclick: resetToLanding }));
     return box;
   }
 
   function resetToLanding() {
-    state = { screen: 'landing', role: null, sessionId: null, messages: [], rating: 0, reportOpen: false, crisisFlagged: false, startedAt: null };
+    state = {
+      ...state,
+      screen: 'landing',
+      role: null,
+      sessionId: null,
+      messages: [],
+      rating: 0,
+      reportOpen: false,
+      crisisFlagged: false,
+      startedAt: null,
+      partnerTyping: false,
+      noteStatus: '',
+      noteSubmitting: false,
+      myName: null,
+      partnerName: null,
+    };
     render();
   }
 

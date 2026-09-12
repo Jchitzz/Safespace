@@ -10,11 +10,29 @@ const { v4: uuidv4 } = require('uuid');
 
 const matching = require('./matching');
 const moderation = require('./moderation');
+const notes = require('./notes');
 
 const app = express();
 app.set('trust proxy', 1); // required on Railway/Render/etc. so rate limiting reads the real client IP
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } }); // tighten origin in production
+
+// -------- Optional Redis adapter for running multiple server instances --------
+// Only activates if REDIS_URL is set. Without it, Socket.IO rooms/broadcasts
+// (and matching, via matching.js) only work correctly within a single
+// process — fine for one Railway/Render instance, not for a scaled fleet.
+if (process.env.REDIS_URL) {
+  // eslint-disable-next-line global-require
+  const { createAdapter } = require('@socket.io/redis-adapter');
+  // eslint-disable-next-line global-require
+  const Redis = require('ioredis');
+  const pubClient = new Redis(process.env.REDIS_URL);
+  const subClient = pubClient.duplicate();
+  io.adapter(createAdapter(pubClient, subClient));
+  console.log('Redis adapter enabled — safe to run multiple instances.');
+} else {
+  console.log('No REDIS_URL set — running in single-instance, in-memory mode.');
+}
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -31,6 +49,67 @@ app.use(httpLimiter);
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
+// -------- Admin reports dashboard (Basic Auth, gated by env var) --------
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function requireAdminAuth(req, res, next) {
+  const expectedUser = process.env.ADMIN_USER || 'admin';
+  const expectedPass = process.env.ADMIN_PASSWORD;
+  if (!expectedPass) {
+    return res.status(503).send('Admin dashboard is disabled. Set ADMIN_PASSWORD in your environment to enable it.');
+  }
+  const header = req.headers.authorization || '';
+  const [scheme, encoded] = header.split(' ');
+  if (scheme === 'Basic' && encoded) {
+    const decoded = Buffer.from(encoded, 'base64').toString();
+    const sep = decoded.indexOf(':');
+    const user = decoded.slice(0, sep);
+    const pass = decoded.slice(sep + 1);
+    if (user === expectedUser && pass === expectedPass) return next();
+  }
+  res.set('WWW-Authenticate', 'Basic realm="SafeSpace Admin"');
+  return res.status(401).send('Authentication required.');
+}
+
+app.get('/admin/reports', requireAdminAuth, (req, res) => {
+  fs.readFile(REPORTS_FILE, 'utf8', (err, data) => {
+    const lines = err ? [] : data.trim().split('\n').filter(Boolean);
+    const entries = lines
+      .map((l) => { try { return JSON.parse(l); } catch (e) { return null; } })
+      .filter(Boolean)
+      .reverse();
+    const rows = entries.map((e) => `
+      <tr>
+        <td>${escapeHtml(e.ts || '')}</td>
+        <td>${escapeHtml(e.reason || '')}</td>
+        <td>${escapeHtml(e.reporterRole || '')}</td>
+        <td>${escapeHtml((e.details || '').slice(0, 300))}</td>
+        <td class="mono">${escapeHtml(e.sessionId || '')}</td>
+      </tr>`).join('');
+    res.send(`<!DOCTYPE html>
+      <html><head><title>Reports — SafeSpace Admin</title>
+      <style>
+        body { font-family: -apple-system, sans-serif; background: #14161a; color: #ece8e0; padding: 32px; }
+        h1 { font-weight: 500; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border-bottom: 1px solid #33373f; padding: 10px 8px; text-align: left; font-size: 0.85rem; vertical-align: top; }
+        th { color: #a1a3a9; font-weight: 600; }
+        .mono { font-family: monospace; font-size: 0.75rem; color: #8b8d93; }
+      </style></head>
+      <body>
+        <h1>Reports (${entries.length})</h1>
+        <table>
+          <tr><th>Time</th><th>Reason</th><th>Reporter role</th><th>Details</th><th>Session</th></tr>
+          ${rows || '<tr><td colspan="5">No reports yet.</td></tr>'}
+        </table>
+      </body></html>`);
+  });
+});
+
 // -------- Per-socket chat rate limiting (simple token bucket) --------
 const MESSAGE_LIMIT = 6; // messages
 const MESSAGE_WINDOW_MS = 5000; // per 5 seconds
@@ -44,55 +123,96 @@ function isRateLimited(socketId) {
   return bucket.length > MESSAGE_LIMIT;
 }
 
+// -------- Per-socket note-wall rate limiting --------
+const NOTE_LIMIT = 3;
+const NOTE_WINDOW_MS = 10 * 60 * 1000; // 3 notes per 10 minutes
+const noteBuckets = new Map();
+
+function isNoteRateLimited(socketId) {
+  const now = Date.now();
+  const bucket = (noteBuckets.get(socketId) || []).filter((t) => now - t < NOTE_WINDOW_MS);
+  bucket.push(now);
+  noteBuckets.set(socketId, bucket);
+  return bucket.length > NOTE_LIMIT;
+}
+
 // -------- Session auto-timeout (avoid orphaned "active" sessions) --------
 const MAX_SESSION_MS = 60 * 60 * 1000; // 1 hour hard cap
 
-function broadcastQueueCounts() {
-  io.emit('queue_counts', matching.getQueueCounts());
+async function broadcastQueueCounts() {
+  io.emit('queue_counts', await matching.getQueueCounts());
+}
+
+async function broadcastHomeStats() {
+  const [conversationCount, communityNotes] = await Promise.all([
+    matching.getConversationCount(),
+    notes.getNotes(50),
+  ]);
+  io.emit('home_stats', { conversationCount, communityNotes });
+}
+
+// Applies a re-match cooldown between whichever two anonIds took part in a
+// session, so an abrupt disconnect or a report doesn't lead to an instant
+// rematch with the same person.
+async function cooldownSessionParticipants(session) {
+  if (!session) return;
+  const venter = session.venter;
+  const listener = session.listener;
+  if (venter && listener) {
+    await matching.applyCooldown(venter.anonId, listener.anonId);
+  }
 }
 
 io.on('connection', (socket) => {
   const anonId = uuidv4(); // never tied to any account, email, or IP in storage
   const anonName = matching.generateUsername(); // fun display name, e.g. "Quiet Fox"
 
-  socket.emit('queue_counts', matching.getQueueCounts());
+  matching.getQueueCounts().then((counts) => socket.emit('queue_counts', counts));
+  Promise.all([matching.getConversationCount(), notes.getNotes(50)]).then(([conversationCount, communityNotes]) => {
+    socket.emit('home_stats', { conversationCount, communityNotes });
+  });
 
-  socket.on('join_queue', ({ role }) => {
+  socket.on('join_queue', async ({ role }) => {
     if (role !== 'venter' && role !== 'listener' && role !== 'flexible') return;
-    const result = matching.joinQueue(role, socket.id, anonId, anonName);
+    const result = await matching.joinQueue(role, socket.id, anonId, anonName);
     if (result.matched) {
-      const partnerSocket = io.sockets.sockets.get(result.partnerSocketId);
-      socket.join(result.sessionId);
-      if (partnerSocket) partnerSocket.join(result.sessionId);
+      // Room joins/emits go through io.in()/io.to() rather than direct
+      // socket references, so this also works correctly across instances
+      // when the Redis adapter is active (the partner's socket may live on
+      // a different process).
+      await io.in(socket.id).socketsJoin(result.sessionId);
+      await io.in(result.partnerSocketId).socketsJoin(result.sessionId);
 
       socket.emit('matched', { sessionId: result.sessionId, role: result.assignedRole, myName: anonName, partnerName: result.partnerName });
-      if (partnerSocket) {
-        const partnerUser = matching.getUserBySocket(result.partnerSocketId);
-        partnerSocket.emit('matched', { sessionId: result.sessionId, role: partnerUser.role, myName: partnerUser.name, partnerName: anonName });
+      const partnerUser = await matching.getUserBySocket(result.partnerSocketId);
+      if (partnerUser) {
+        io.to(result.partnerSocketId).emit('matched', { sessionId: result.sessionId, role: partnerUser.role, myName: partnerUser.name, partnerName: anonName });
       }
 
-      setTimeout(() => {
-        const session = matching.getSession(result.sessionId);
+      setTimeout(async () => {
+        const session = await matching.getSession(result.sessionId);
         if (session && session.status === 'active') {
-          matching.endSession(result.sessionId);
+          await matching.endSession(result.sessionId);
           io.to(result.sessionId).emit('session_ended', { sessionId: result.sessionId, reason: 'timeout' });
         }
       }, MAX_SESSION_MS);
+
+      broadcastHomeStats();
     } else {
       socket.emit('waiting');
     }
-    broadcastQueueCounts();
+    await broadcastQueueCounts();
   });
 
-  socket.on('leave_queue', () => {
-    matching.leaveQueue(socket.id);
-    broadcastQueueCounts();
+  socket.on('leave_queue', async () => {
+    await matching.leaveQueue(socket.id);
+    await broadcastQueueCounts();
   });
 
-  socket.on('send_message', ({ sessionId, text }) => {
-    const user = matching.getUserBySocket(socket.id);
+  socket.on('send_message', async ({ sessionId, text }) => {
+    const user = await matching.getUserBySocket(socket.id);
     if (!user || user.sessionId !== sessionId) return;
-    const session = matching.getSession(sessionId);
+    const session = await matching.getSession(sessionId);
     if (!session || session.status !== 'active') return;
     if (isRateLimited(socket.id)) {
       socket.emit('rate_limited');
@@ -115,27 +235,27 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('typing', ({ sessionId }) => {
-    const user = matching.getUserBySocket(socket.id);
+  socket.on('typing', async ({ sessionId }) => {
+    const user = await matching.getUserBySocket(socket.id);
     if (!user || user.sessionId !== sessionId) return;
-    const session = matching.getSession(sessionId);
+    const session = await matching.getSession(sessionId);
     if (!session || session.status !== 'active') return;
     socket.to(sessionId).emit('partner_typing');
   });
 
-  socket.on('stop_typing', ({ sessionId }) => {
-    const user = matching.getUserBySocket(socket.id);
+  socket.on('stop_typing', async ({ sessionId }) => {
+    const user = await matching.getUserBySocket(socket.id);
     if (!user || user.sessionId !== sessionId) return;
     socket.to(sessionId).emit('partner_stopped_typing');
   });
 
-  socket.on('end_session', ({ sessionId }) => {
-    const session = matching.endSession(sessionId);
+  socket.on('end_session', async ({ sessionId }) => {
+    const session = await matching.endSession(sessionId);
     if (session) io.to(sessionId).emit('session_ended', { sessionId, reason: 'ended_by_peer' });
   });
 
-  socket.on('report', ({ sessionId, reason, details }) => {
-    const user = matching.getUserBySocket(socket.id);
+  socket.on('report', async ({ sessionId, reason, details }) => {
+    const user = await matching.getUserBySocket(socket.id);
     const entry = {
       id: uuidv4(),
       sessionId,
@@ -144,28 +264,60 @@ io.on('connection', (socket) => {
       details: (details || '').slice(0, 1000),
       ts: new Date().toISOString(),
     };
-    fs.appendFile(REPORTS_FILE, JSON.stringify(entry) + '\n', (err) => {
+    fs.appendFile(REPORTS_FILE, `${JSON.stringify(entry)}\n`, (err) => {
       if (err) console.error('Failed to write report:', err);
     });
+
+    const session = await matching.getSession(sessionId);
+    await cooldownSessionParticipants(session);
+
     socket.emit('report_received');
   });
 
-  socket.on('disconnect', () => {
-    const user = matching.disconnectSocket(socket.id);
+  socket.on('submit_note', async ({ text }) => {
+    if (isNoteRateLimited(socket.id)) {
+      socket.emit('note_rejected', { reason: 'rate_limited' });
+      return;
+    }
+    const trimmed = typeof text === 'string' ? text.trim() : '';
+    if (!trimmed) {
+      socket.emit('note_rejected', { reason: 'empty' });
+      return;
+    }
+    if (trimmed.length > 140) {
+      socket.emit('note_rejected', { reason: 'too_long' });
+      return;
+    }
+    if (moderation.containsCrisisLanguage(trimmed)) {
+      socket.emit('note_rejected', { reason: 'crisis', message: moderation.CRISIS_RESOURCE_MESSAGE });
+      return;
+    }
+    const clean = moderation.sanitizeMessage(trimmed);
+    await notes.addNote(clean);
+    socket.emit('note_accepted');
+    await broadcastHomeStats();
+  });
+
+  socket.on('disconnect', async () => {
+    const user = await matching.disconnectSocket(socket.id);
     messageBuckets.delete(socket.id);
+    noteBuckets.delete(socket.id);
     if (user && user.sessionId) {
-      const session = matching.endSession(user.sessionId);
+      const session = await matching.endSession(user.sessionId);
       if (session) {
         socket.to(user.sessionId).emit('session_ended', { sessionId: user.sessionId, reason: 'peer_disconnected' });
+        await cooldownSessionParticipants(session); // abrupt ending — cool down this pair
       }
     }
-    broadcastQueueCounts();
+    await broadcastQueueCounts();
   });
 });
 
-// Periodic fallback so counts stay accurate even if someone's tab silently
-// closed without a clean disconnect event, or a queue entry went stale.
+// Periodic fallback so counts/stats stay accurate even if someone's tab
+// silently closed without a clean disconnect event, a queue entry went
+// stale, or (in Redis mode) another instance changed shared state.
 setInterval(broadcastQueueCounts, 10000);
+setInterval(broadcastHomeStats, 15000);
 
 server.listen(PORT, () => {
   console.log(`safespace server listening on port ${PORT}`);
