@@ -34,6 +34,7 @@
 
   function createThemeToggle() {
     const btn = document.createElement('button');
+    btn.id = 'theme-toggle-btn';
     btn.className = 'theme-toggle';
     btn.setAttribute('aria-label', 'Switch to ' + (currentTheme === 'light' ? 'dark' : 'light') + ' theme');
     btn.setAttribute('aria-pressed', String(currentTheme === 'light'));
