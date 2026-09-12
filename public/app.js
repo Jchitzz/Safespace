@@ -11,10 +11,16 @@
     crisisFlagged: false,
     startedAt: null,
     partnerTyping: false,
+    queueCounts: { venter: 0, listener: 0, flexible: 0 },
   };
   let tickInterval = null;
   let typingTimeout = null;
   let isTyping = false;
+
+  socket.on('queue_counts', (counts) => {
+    state.queueCounts = counts;
+    if (state.screen === 'landing') render();
+  });
 
   function render() {
     const app = document.getElementById('app');
@@ -41,6 +47,24 @@
     return e;
   }
 
+  function renderQueueStatus() {
+    const { venter, listener, flexible } = state.queueCounts;
+    const total = venter + listener + flexible;
+    if (total === 0) {
+      return el('p', { class: 'queue-status' }, "No one's waiting right now — you'll likely be first in line.");
+    }
+    const parts = [];
+    if (venter > 0) parts.push(el('span', {}, [el('span', { class: 'dot amber' }), `${venter} waiting to vent`]));
+    if (listener > 0) parts.push(el('span', {}, [el('span', { class: 'dot teal' }), `${listener} waiting to listen`]));
+    if (flexible > 0) parts.push(el('span', {}, [el('span', { class: 'dot flex' }), `${flexible} open to either`]));
+    const row = el('p', { class: 'queue-status' });
+    parts.forEach((p, i) => {
+      row.appendChild(p);
+      if (i < parts.length - 1) row.appendChild(document.createTextNode('  ·  '));
+    });
+    return row;
+  }
+
   // ---------------- LANDING ----------------
   function renderLanding() {
     return el('div', { class: 'landing' }, [
@@ -60,7 +84,13 @@
           el('h2', { text: 'Listen' }),
           el('p', { text: "Be the calm presence for someone who needs to talk. You don't need answers — just attention." }),
         ]),
+        el('button', { class: 'choice flex', onclick: () => joinQueue('flexible') }, [
+          el('span', { class: 'tag', text: "I don't mind" }),
+          el('h2', { text: 'Surprise Me' }),
+          el('p', { text: "Skip the choice. You'll be matched instantly with whoever's here, as whichever role is needed." }),
+        ]),
       ]),
+      renderQueueStatus(),
       el('p', { class: 'footnote' }, [
         "This is a peer support space, not therapy or emergency care. If you're in crisis (US), call or text 988, or chat at ",
         el('a', { href: 'https://988lifeline.org/chat', target: '_blank', text: '988lifeline.org' }),
@@ -87,9 +117,15 @@
   }
 
   function renderWaiting() {
+    const pulseColor = state.role === 'venter' ? 'amber' : state.role === 'listener' ? 'teal' : 'flex';
+    const message = state.role === 'venter'
+      ? 'Looking for someone to listen…'
+      : state.role === 'listener'
+        ? 'Looking for someone who wants to talk…'
+        : 'Looking for anyone to connect with…';
     return el('div', { class: 'waiting' }, [
-      el('div', { class: 'pulse ' + (state.role === 'venter' ? 'amber' : 'teal') }),
-      el('h3', { text: state.role === 'venter' ? 'Looking for someone to listen…' : 'Looking for someone who wants to talk…' }),
+      el('div', { class: 'pulse ' + pulseColor }),
+      el('h3', { text: message }),
       el('p', { text: 'This can take a moment. Keep this tab open.' }),
       el('button', { class: 'cancel-btn', onclick: cancelWait, text: 'Cancel' }),
     ]);

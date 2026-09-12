@@ -47,22 +47,28 @@ function isRateLimited(socketId) {
 // -------- Session auto-timeout (avoid orphaned "active" sessions) --------
 const MAX_SESSION_MS = 60 * 60 * 1000; // 1 hour hard cap
 
+function broadcastQueueCounts() {
+  io.emit('queue_counts', matching.getQueueCounts());
+}
+
 io.on('connection', (socket) => {
   const anonId = uuidv4(); // never tied to any account, email, or IP in storage
   const anonName = matching.generateUsername(); // fun display name, e.g. "Quiet Fox"
 
+  socket.emit('queue_counts', matching.getQueueCounts());
+
   socket.on('join_queue', ({ role }) => {
-    if (role !== 'venter' && role !== 'listener') return;
+    if (role !== 'venter' && role !== 'listener' && role !== 'flexible') return;
     const result = matching.joinQueue(role, socket.id, anonId, anonName);
     if (result.matched) {
       const partnerSocket = io.sockets.sockets.get(result.partnerSocketId);
       socket.join(result.sessionId);
       if (partnerSocket) partnerSocket.join(result.sessionId);
 
-      socket.emit('matched', { sessionId: result.sessionId, role, myName: anonName, partnerName: result.partnerName });
+      socket.emit('matched', { sessionId: result.sessionId, role: result.assignedRole, myName: anonName, partnerName: result.partnerName });
       if (partnerSocket) {
-        const oppositeRole = role === 'venter' ? 'listener' : 'venter';
-        partnerSocket.emit('matched', { sessionId: result.sessionId, role: oppositeRole, myName: result.partnerName, partnerName: anonName });
+        const partnerUser = matching.getUserBySocket(result.partnerSocketId);
+        partnerSocket.emit('matched', { sessionId: result.sessionId, role: partnerUser.role, myName: partnerUser.name, partnerName: anonName });
       }
 
       setTimeout(() => {
@@ -75,10 +81,12 @@ io.on('connection', (socket) => {
     } else {
       socket.emit('waiting');
     }
+    broadcastQueueCounts();
   });
 
   socket.on('leave_queue', () => {
     matching.leaveQueue(socket.id);
+    broadcastQueueCounts();
   });
 
   socket.on('send_message', ({ sessionId, text }) => {
@@ -151,8 +159,13 @@ io.on('connection', (socket) => {
         socket.to(user.sessionId).emit('session_ended', { sessionId: user.sessionId, reason: 'peer_disconnected' });
       }
     }
+    broadcastQueueCounts();
   });
 });
+
+// Periodic fallback so counts stay accurate even if someone's tab silently
+// closed without a clean disconnect event, or a queue entry went stale.
+setInterval(broadcastQueueCounts, 10000);
 
 server.listen(PORT, () => {
   console.log(`safespace server listening on port ${PORT}`);

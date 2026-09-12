@@ -27,7 +27,7 @@ function generateUsername() {
   return `${adj} ${noun}`;
 }
 
-const queues = { venter: [], listener: [] };
+const queues = { venter: [], listener: [], flexible: [] };
 const sessions = new Map(); // sessionId -> { listenerId, venterId, startedAt, status }
 const socketToUser = new Map(); // socketId -> { anonId, role, sessionId }
 
@@ -37,33 +37,71 @@ function cleanQueue(role) {
   queues[role] = queues[role].filter((u) => Date.now() - u.joinedAt < STALE_MS);
 }
 
-function joinQueue(role, socketId, anonId, name) {
-  const opposite = role === 'venter' ? 'listener' : 'venter';
-  cleanQueue(opposite);
-  cleanQueue(role);
+function cleanAllQueues() {
+  cleanQueue('venter');
+  cleanQueue('listener');
+  cleanQueue('flexible');
+}
 
-  if (queues[opposite].length > 0) {
-    const partner = queues[opposite].shift();
-    const sessionId = uuidv4();
-    const session = {
-      startedAt: Date.now(),
-      status: 'active',
-      [role]: { socketId, anonId, name },
-      [opposite]: partner,
-    };
-    sessions.set(sessionId, session);
-    socketToUser.set(socketId, { anonId, name, role, sessionId });
-    socketToUser.set(partner.socketId, { anonId: partner.anonId, name: partner.name, role: opposite, sessionId });
-    return { matched: true, sessionId, partnerSocketId: partner.socketId, partnerName: partner.name };
+function getQueueCounts() {
+  cleanAllQueues();
+  return { venter: queues.venter.length, listener: queues.listener.length, flexible: queues.flexible.length };
+}
+
+function finalizeMatch(self, selfRole, partner, partnerRole) {
+  const sessionId = uuidv4();
+  const session = {
+    startedAt: Date.now(),
+    status: 'active',
+    [selfRole]: self,
+    [partnerRole]: partner,
+  };
+  sessions.set(sessionId, session);
+  socketToUser.set(self.socketId, { anonId: self.anonId, name: self.name, role: selfRole, sessionId });
+  socketToUser.set(partner.socketId, { anonId: partner.anonId, name: partner.name, role: partnerRole, sessionId });
+  return { matched: true, sessionId, partnerSocketId: partner.socketId, partnerName: partner.name, assignedRole: selfRole };
+}
+
+// role is 'venter', 'listener', or 'flexible' (no preference — match with whoever's around).
+function joinQueue(role, socketId, anonId, name) {
+  cleanAllQueues();
+  const self = { socketId, anonId, name };
+
+  if (role === 'venter' || role === 'listener') {
+    const opposite = role === 'venter' ? 'listener' : 'venter';
+    if (queues[opposite].length > 0) {
+      const partner = queues[opposite].shift();
+      return finalizeMatch(self, role, partner, opposite);
+    }
+    if (queues.flexible.length > 0) {
+      const partner = queues.flexible.shift();
+      return finalizeMatch(self, role, partner, opposite);
+    }
+    queues[role].push({ ...self, joinedAt: Date.now() });
+    return { matched: false };
   }
 
-  queues[role].push({ socketId, anonId, name, joinedAt: Date.now() });
+  // role === 'flexible': take whichever role is actually needed right now.
+  if (queues.venter.length > 0) {
+    const partner = queues.venter.shift();
+    return finalizeMatch(self, 'listener', partner, 'venter');
+  }
+  if (queues.listener.length > 0) {
+    const partner = queues.listener.shift();
+    return finalizeMatch(self, 'venter', partner, 'listener');
+  }
+  if (queues.flexible.length > 0) {
+    const partner = queues.flexible.shift();
+    return finalizeMatch(self, 'listener', partner, 'venter'); // arbitrary but consistent split
+  }
+  queues.flexible.push({ ...self, joinedAt: Date.now() });
   return { matched: false };
 }
 
 function leaveQueue(socketId) {
   queues.venter = queues.venter.filter((u) => u.socketId !== socketId);
   queues.listener = queues.listener.filter((u) => u.socketId !== socketId);
+  queues.flexible = queues.flexible.filter((u) => u.socketId !== socketId);
 }
 
 function getSession(sessionId) {
@@ -95,4 +133,5 @@ module.exports = {
   endSession,
   getUserBySocket,
   disconnectSocket,
+  getQueueCounts,
 };

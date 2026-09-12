@@ -43,19 +43,33 @@
   .brand h1 { font-size: 2.4rem; margin: 0 0 10px; letter-spacing: 0.3px; }
   .brand p { color: var(--muted); font-size: 1.02rem; max-width: 420px; margin: 0 auto; line-height: 1.5; }
   .choices {
-    position: relative; display: flex; gap: 2px; width: 100%; max-width: 640px;
+    position: relative; display: flex; gap: 2px; width: 100%; max-width: 760px;
     background: var(--hairline); border-radius: 14px; overflow: hidden;
   }
   .choice {
-    flex: 1; background: var(--surface); padding: 36px 24px; text-align: left;
+    flex: 1; background: var(--surface); padding: 32px 22px; text-align: left;
     display: flex; flex-direction: column; gap: 10px; transition: background 0.2s ease;
   }
   .choice:hover { background: var(--surface-raised); }
   .choice .tag { font-size: 0.8rem; color: var(--muted); }
-  .choice h2 { font-size: 1.35rem; margin: 0; }
-  .choice p { color: var(--muted); font-size: 0.92rem; line-height: 1.5; margin: 0; }
+  .choice h2 { font-size: 1.3rem; margin: 0; }
+  .choice p { color: var(--muted); font-size: 0.88rem; line-height: 1.5; margin: 0; }
   .choice.vent h2 { color: var(--amber); }
   .choice.listen h2 { color: var(--teal); }
+  .choice.flex h2 {
+    background-image: linear-gradient(90deg, var(--amber), var(--teal));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .queue-status {
+    position: relative; margin-top: 22px; color: var(--muted); font-size: 0.82rem;
+    display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap;
+  }
+  .queue-status .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px;
+  }
+  .queue-status .dot.amber { background: var(--amber); }
+  .queue-status .dot.teal { background: var(--teal); }
+  .queue-status .dot.flex { background-image: linear-gradient(90deg, var(--amber), var(--teal)); }
   .footnote {
     position: relative; margin-top: 40px; color: var(--muted); font-size: 0.82rem;
     text-align: center; max-width: 480px; line-height: 1.6;
@@ -73,6 +87,7 @@
   }
   .pulse.amber { background: var(--amber); }
   .pulse.teal { background: var(--teal); }
+  .pulse.flex { background-image: linear-gradient(135deg, var(--amber), var(--teal)); }
   @keyframes pulse {
     0%, 100% { transform: scale(1); opacity: 0.6; }
     50% { transform: scale(1.6); opacity: 1; }
