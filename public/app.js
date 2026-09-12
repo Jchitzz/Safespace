@@ -180,7 +180,7 @@
     });
     textarea.addEventListener('input', handleTypingSignal);
     const sendBtn = el('button', { class: 'send-btn' + (isVenter ? '' : ' listener-mode'), text: 'Send', onclick: () => sendMessage(textarea) });
-    container.appendChild(el('div', { class: 'composer' }, [textarea, sendBtn]));
+    container.appendChild(el('div', { class: 'composer ' + (isVenter ? 'venter-mode' : 'listener-mode') }, [textarea, sendBtn]));
     return container;
   }
 
