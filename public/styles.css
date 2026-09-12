@@ -5,11 +5,13 @@
     --hairline: #33373f;
     --text: #ece8e0;
     --muted: #8b8d93;
+    --muted-strong: #a1a3a9;
     --amber: #e1a756;
     --amber-dim: #4a3d2a;
     --teal: #5fa8a2;
     --teal-dim: #24403d;
     --danger: #c97064;
+    --danger-strong: #d98f85;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -23,8 +25,15 @@
     font-family: inherit; cursor: pointer; border: none;
     -webkit-tap-highlight-color: transparent;
   }
-  button:focus-visible, input:focus-visible, textarea:focus-visible {
-    outline: 2px solid var(--muted); outline-offset: 2px;
+  a { color: inherit; }
+  :focus-visible {
+    outline: 2px solid var(--muted-strong); outline-offset: 2px; border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+    }
   }
   #app { min-height: 100vh; display: flex; flex-direction: column; }
 
@@ -75,6 +84,11 @@
     text-align: center; max-width: 480px; line-height: 1.6;
   }
   .footnote a { color: var(--muted); text-decoration: underline; }
+  .footer-links { position: relative; margin-top: 14px; text-align: center; }
+  .footer-links a {
+    color: var(--muted-strong); font-size: 0.78rem; text-decoration: underline;
+    margin: 0 8px;
+  }
 
   /* ---------- WAITING ---------- */
   .waiting {
@@ -114,11 +128,11 @@
   .chat-top .timer { color: var(--muted); font-size: 0.82rem; }
   .chat-top-actions { display: flex; gap: 8px; }
   .icon-btn {
-    background: var(--surface-raised); color: var(--muted); font-size: 0.78rem;
-    padding: 6px 12px; border-radius: 8px;
+    background: var(--surface-raised); color: var(--muted-strong); font-size: 0.78rem;
+    padding: 8px 14px; border-radius: 8px; min-height: 32px;
   }
   .icon-btn:hover { color: var(--text); }
-  .icon-btn.report:hover { color: var(--danger); }
+  .icon-btn.report:hover { color: var(--danger-strong); }
 
   .messages {
     flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px;
@@ -135,7 +149,7 @@
     border-radius: 10px; padding: 14px 16px; font-size: 0.88rem; line-height: 1.55;
     margin-bottom: 12px;
   }
-  .crisis-banner strong { color: var(--danger); }
+  .crisis-banner strong { color: var(--danger-strong); }
 
   .typing-indicator {
     align-self: flex-start; color: var(--muted); font-size: 0.85rem;
@@ -192,7 +206,7 @@
   }
   .end-screen h2 { margin: 0; }
   .stars { display: flex; gap: 6px; }
-  .star { font-size: 1.8rem; background: none; color: var(--hairline); }
+  .star { font-size: 1.8rem; background: none; color: var(--hairline); padding: 6px; min-width: 44px; min-height: 44px; }
   .star.filled { color: var(--amber); }
   .again-btn { background: var(--surface-raised); color: var(--text); padding: 10px 22px; border-radius: 10px; margin-top: 10px; }
 
@@ -202,6 +216,7 @@
     align-items: center; justify-content: center; padding: 20px; z-index: 10;
   }
   .modal { background: var(--surface); border-radius: 14px; padding: 24px; max-width: 420px; width: 100%; }
+  .modal.wide { max-width: 480px; max-height: 85vh; overflow-y: auto; }
   .modal h3 { margin: 0 0 10px; }
   .modal p { color: var(--muted); font-size: 0.88rem; margin: 0 0 16px; }
   .modal select, .modal textarea {

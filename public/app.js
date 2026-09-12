@@ -1,5 +1,13 @@
 (function () {
   const socket = io();
+  const CONSENT_KEY = 'safespace_consent_v1';
+
+  function hasConsented() {
+    try { return !!localStorage.getItem(CONSENT_KEY); } catch (e) { return false; }
+  }
+  function recordConsent() {
+    try { localStorage.setItem(CONSENT_KEY, '1'); } catch (e) { /* private browsing etc. — non-fatal */ }
+  }
 
   let state = {
     screen: 'landing',
@@ -12,6 +20,7 @@
     startedAt: null,
     partnerTyping: false,
     queueCounts: { venter: 0, listener: 0, flexible: 0 },
+    consentGiven: hasConsented(),
   };
   let tickInterval = null;
   let typingTimeout = null;
@@ -29,7 +38,31 @@
     else if (state.screen === 'waiting') app.appendChild(renderWaiting());
     else if (state.screen === 'chat') app.appendChild(renderChat());
     else if (state.screen === 'end') app.appendChild(renderEnd());
-    if (state.reportOpen) app.appendChild(renderReportModal());
+    if (state.reportOpen) {
+      app.appendChild(renderReportModal());
+      setupFocusTrap('report-modal', () => { state.reportOpen = false; render(); });
+    }
+    if (!state.consentGiven) {
+      app.appendChild(renderConsentModal());
+      setupFocusTrap('consent-modal', null); // required acknowledgment — no Escape/backdrop dismiss
+    }
+  }
+
+  function setupFocusTrap(containerId, onEscape) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const focusables = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    first.focus();
+    container.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && onEscape) onEscape();
+      if (e.key === 'Tab') {
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
   }
 
   function el(tag, props = {}, children = []) {
@@ -54,9 +87,9 @@
       return el('p', { class: 'queue-status' }, "No one's waiting right now — you'll likely be first in line.");
     }
     const parts = [];
-    if (venter > 0) parts.push(el('span', {}, [el('span', { class: 'dot amber' }), `${venter} waiting to vent`]));
-    if (listener > 0) parts.push(el('span', {}, [el('span', { class: 'dot teal' }), `${listener} waiting to listen`]));
-    if (flexible > 0) parts.push(el('span', {}, [el('span', { class: 'dot flex' }), `${flexible} open to either`]));
+    if (venter > 0) parts.push(el('span', {}, [el('span', { class: 'dot amber', 'aria-hidden': 'true' }), `${venter} waiting to vent`]));
+    if (listener > 0) parts.push(el('span', {}, [el('span', { class: 'dot teal', 'aria-hidden': 'true' }), `${listener} waiting to listen`]));
+    if (flexible > 0) parts.push(el('span', {}, [el('span', { class: 'dot flex', 'aria-hidden': 'true' }), `${flexible} open to either`]));
     const row = el('p', { class: 'queue-status' });
     parts.forEach((p, i) => {
       row.appendChild(p);
@@ -73,7 +106,7 @@
         el('h1', { text: 'safespace' }),
         el('p', { text: "A place to talk to a stranger who's only there to listen — or to be that person for someone else. No names, no history, no accounts." }),
       ]),
-      el('div', { class: 'choices' }, [
+      el('div', { class: 'choices', role: 'group', 'aria-label': 'Choose how you want to participate' }, [
         el('button', { class: 'choice vent', onclick: () => joinQueue('venter') }, [
           el('span', { class: 'tag', text: 'I want to' }),
           el('h2', { text: 'Vent' }),
@@ -100,6 +133,9 @@
         el('a', { href: 'https://findahelpline.com', target: '_blank', text: 'findahelpline.com' }),
         '.',
       ]),
+      el('div', { class: 'footer-links' }, [
+        el('a', { href: '/terms.html', target: '_blank', text: 'Terms & Privacy' }),
+      ]),
     ]);
   }
 
@@ -124,7 +160,7 @@
         ? 'Looking for someone who wants to talk…'
         : 'Looking for anyone to connect with…';
     return el('div', { class: 'waiting' }, [
-      el('div', { class: 'pulse ' + pulseColor }),
+      el('div', { class: 'pulse ' + pulseColor, 'aria-hidden': 'true' }),
       el('h3', { text: message }),
       el('p', { text: 'This can take a moment. Keep this tab open.' }),
       el('button', { class: 'cancel-btn', onclick: cancelWait, text: 'Cancel' }),
@@ -206,11 +242,11 @@
         el('button', { class: 'icon-btn', onclick: () => socket.emit('end_session', { sessionId: state.sessionId }), text: 'End' }),
       ]),
     ]));
-    const msgWrap = el('div', { class: 'messages', id: 'messages-wrap' });
+    const msgWrap = el('div', { class: 'messages', id: 'messages-wrap', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions', 'aria-label': 'Conversation' });
     container.appendChild(msgWrap);
     renderMessageList(msgWrap);
 
-    const textarea = el('textarea', { rows: '1', placeholder: 'Type a message…', id: 'composer-input' });
+    const textarea = el('textarea', { rows: '1', placeholder: 'Type a message…', id: 'composer-input', 'aria-label': 'Type a message' });
     textarea.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(textarea); }
     });
@@ -250,7 +286,7 @@
     if (state.partnerTyping) {
       wrap.appendChild(el('div', { class: 'typing-indicator' }, [
         `${state.partnerName || 'They'} is typing`,
-        el('span', { class: 'typing-dots' }, [
+        el('span', { class: 'typing-dots', 'aria-hidden': 'true' }, [
           el('span', {}), el('span', {}), el('span', {}),
         ]),
       ]));
@@ -283,9 +319,14 @@
       el('p', { text: isVenter ? `Thanks for sharing with ${state.partnerName || 'someone'}. How did it feel to be heard?` : `Thanks for showing up for ${state.partnerName || 'someone'} today.` }),
     ]);
     if (isVenter) {
-      const starsWrap = el('div', { class: 'stars' });
+      const starsWrap = el('div', { class: 'stars', role: 'group', 'aria-label': 'Rate your experience, 1 to 5 stars' });
       for (let i = 1; i <= 5; i++) {
-        const s = el('button', { class: 'star' + (i <= state.rating ? ' filled' : ''), text: '★' });
+        const s = el('button', {
+          class: 'star' + (i <= state.rating ? ' filled' : ''),
+          text: '★',
+          'aria-label': `Rate ${i} out of 5 stars`,
+          'aria-pressed': String(i <= state.rating),
+        });
         s.addEventListener('click', () => { state.rating = i; render(); });
         starsWrap.appendChild(s);
       }
@@ -304,16 +345,16 @@
   function renderReportModal() {
     let reason = 'harassment';
     let details = '';
-    const overlay = el('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) { state.reportOpen = false; render(); } } });
-    const select = el('select');
+    const overlay = el('div', { class: 'modal-overlay', id: 'report-modal', onclick: (e) => { if (e.target === overlay) { state.reportOpen = false; render(); } } });
+    const select = el('select', { 'aria-label': 'Reason for report' });
     [['harassment', 'Harassment or abuse'], ['spam', 'Spam or off-topic'], ['safety', 'Safety concern about the other person'], ['other', 'Other']].forEach(([v, label]) => {
       select.appendChild(el('option', { value: v, text: label }));
     });
     select.addEventListener('change', (e) => { reason = e.target.value; });
-    const textarea = el('textarea', { rows: '3', placeholder: 'Optional details…' });
+    const textarea = el('textarea', { rows: '3', placeholder: 'Optional details…', 'aria-label': 'Additional details, optional' });
     textarea.addEventListener('input', (e) => { details = e.target.value; });
-    const modal = el('div', { class: 'modal' }, [
-      el('h3', { text: 'Report this session' }),
+    const modal = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'report-title' }, [
+      el('h3', { id: 'report-title', text: 'Report this session' }),
       el('p', { text: "Reports are anonymous. If you're in immediate danger, contact local emergency services." }),
       select,
       textarea,
@@ -322,6 +363,32 @@
         el('button', {
           class: 'btn-danger', text: 'Submit report', onclick: () => {
             socket.emit('report', { sessionId: state.sessionId, reason, details });
+          },
+        }),
+      ]),
+    ]);
+    overlay.appendChild(modal);
+    return overlay;
+  }
+
+  // ---------------- CONSENT GATE ----------------
+  function renderConsentModal() {
+    const overlay = el('div', { class: 'modal-overlay', id: 'consent-modal' });
+    const modal = el('div', { class: 'modal wide', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'consent-title' }, [
+      el('h3', { id: 'consent-title', text: 'Before you continue' }),
+      el('p', { text: 'SafeSpace connects you with anonymous strangers for peer support conversations. It is not therapy, counseling, medical advice, or a crisis service, and the people you talk to are not verified professionals.' }),
+      el('p', { text: "If you're in crisis, please contact 988 (call or text) or chat at 988lifeline.org right now, rather than waiting for a match." }),
+      el('p', {}, [
+        'You must be 18 or older to use this site. By continuing, you agree not to share identifying information, harass other users, or use this space for anything illegal, and you agree to our ',
+        el('a', { href: '/terms.html', target: '_blank', text: 'Terms & Privacy Policy' }),
+        '.',
+      ]),
+      el('div', { class: 'modal-actions' }, [
+        el('button', {
+          class: 'btn-danger', text: 'I understand, continue', onclick: () => {
+            recordConsent();
+            state.consentGiven = true;
+            render();
           },
         }),
       ]),
