@@ -12,6 +12,7 @@ const matching = require('./matching');
 const moderation = require('./moderation');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } }); // tighten origin in production
 
