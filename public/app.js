@@ -136,6 +136,8 @@
       app.appendChild(renderConsentModal());
       setupFocusTrap('consent-modal', null); // required acknowledgment — no Escape/backdrop dismiss
     }
+    const toggleBtn = document.getElementById('theme-toggle-btn');
+    if (toggleBtn) toggleBtn.classList.toggle('hidden', state.screen === 'chat');
   }
 
   function setupFocusTrap(containerId, onEscape) {

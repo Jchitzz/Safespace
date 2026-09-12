@@ -55,6 +55,7 @@
     display: flex; align-items: center; justify-content: center;
   }
   .theme-toggle:hover { background: var(--surface); }
+  .theme-toggle.hidden { display: none; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
