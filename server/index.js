@@ -12,7 +12,7 @@ const matching = require('./matching');
 const moderation = require('./moderation');
 
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', 1); // required on Railway/Render/etc. so rate limiting reads the real client IP
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } }); // tighten origin in production
 
@@ -49,19 +49,20 @@ const MAX_SESSION_MS = 60 * 60 * 1000; // 1 hour hard cap
 
 io.on('connection', (socket) => {
   const anonId = uuidv4(); // never tied to any account, email, or IP in storage
+  const anonName = matching.generateUsername(); // fun display name, e.g. "Quiet Fox"
 
   socket.on('join_queue', ({ role }) => {
     if (role !== 'venter' && role !== 'listener') return;
-    const result = matching.joinQueue(role, socket.id, anonId);
+    const result = matching.joinQueue(role, socket.id, anonId, anonName);
     if (result.matched) {
       const partnerSocket = io.sockets.sockets.get(result.partnerSocketId);
       socket.join(result.sessionId);
       if (partnerSocket) partnerSocket.join(result.sessionId);
 
-      socket.emit('matched', { sessionId: result.sessionId, role });
+      socket.emit('matched', { sessionId: result.sessionId, role, myName: anonName, partnerName: result.partnerName });
       if (partnerSocket) {
         const oppositeRole = role === 'venter' ? 'listener' : 'venter';
-        partnerSocket.emit('matched', { sessionId: result.sessionId, role: oppositeRole });
+        partnerSocket.emit('matched', { sessionId: result.sessionId, role: oppositeRole, myName: result.partnerName, partnerName: anonName });
       }
 
       setTimeout(() => {
@@ -96,6 +97,7 @@ io.on('connection', (socket) => {
 
     io.to(sessionId).emit('message', {
       sender: user.role,
+      senderName: user.name,
       text: clean,
       ts: Date.now(),
     });

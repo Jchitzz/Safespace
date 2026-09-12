@@ -93,9 +93,11 @@
   }
 
   // ---------------- CHAT ----------------
-  socket.on('matched', ({ sessionId, role }) => {
+  socket.on('matched', ({ sessionId, role, myName, partnerName }) => {
     state.sessionId = sessionId;
     state.role = role;
+    state.myName = myName;
+    state.partnerName = partnerName;
     state.screen = 'chat';
     state.messages = [];
     state.crisisFlagged = false;
@@ -143,7 +145,10 @@
     const isVenter = state.role === 'venter';
     const container = el('div', { class: 'chat' });
     container.appendChild(el('div', { class: 'chat-top' }, [
-      el('span', { class: 'role-pill ' + (isVenter ? 'venter-view' : 'listener-view'), text: isVenter ? 'Venting' : 'Listening' }),
+      el('div', { class: 'chat-identity' }, [
+        el('span', { class: 'role-pill ' + (isVenter ? 'venter-view' : 'listener-view'), text: isVenter ? 'Venting' : 'Listening' }),
+        el('span', { class: 'you-are', text: 'as ' + (state.myName || '\u2026') }),
+      ]),
       el('span', { class: 'timer', id: 'timer-display', text: formatElapsed() }),
       el('div', { class: 'chat-top-actions' }, [
         el('button', { class: 'icon-btn report', onclick: () => { state.reportOpen = true; render(); }, text: 'Report' }),
@@ -166,7 +171,7 @@
   function renderMessageList(wrap) {
     wrap.innerHTML = '';
     if (state.messages.length === 0) {
-      wrap.appendChild(el('div', { class: 'msg system', text: "You're connected. Say hello whenever you're ready." }));
+      wrap.appendChild(el('div', { class: 'msg system', text: `You're connected with ${state.partnerName || 'someone'}. Say hello whenever you're ready.` }));
     }
     state.messages.forEach((m) => {
       const mine = m.sender === state.role;
@@ -198,7 +203,7 @@
     const isVenter = state.role === 'venter';
     const box = el('div', { class: 'end-screen' }, [
       el('h2', { text: 'Session ended' }),
-      el('p', { text: isVenter ? 'Thanks for sharing. How did it feel to be heard?' : 'Thanks for showing up for someone today.' }),
+      el('p', { text: isVenter ? `Thanks for sharing with ${state.partnerName || 'someone'}. How did it feel to be heard?` : `Thanks for showing up for ${state.partnerName || 'someone'} today.` }),
     ]);
     if (isVenter) {
       const starsWrap = el('div', { class: 'stars' });

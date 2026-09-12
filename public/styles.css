@@ -89,9 +89,11 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 18px; border-bottom: 1px solid var(--hairline); background: var(--surface);
   }
+  .chat-identity { display: flex; align-items: center; gap: 8px; }
   .chat-top .role-pill {
     font-size: 0.78rem; padding: 4px 10px; border-radius: 20px; color: var(--bg); font-weight: 600;
   }
+  .chat-top .you-are { color: var(--muted); font-size: 0.85rem; }
   .role-pill.venter-view { background: var(--amber); }
   .role-pill.listener-view { background: var(--teal); }
   .chat-top .timer { color: var(--muted); font-size: 0.82rem; }

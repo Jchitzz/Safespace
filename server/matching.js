@@ -10,6 +10,23 @@
 
 const { v4: uuidv4 } = require('uuid');
 
+// Fun, calm-toned anonymous display names — no identity, just personality.
+const ADJECTIVES = [
+  'Quiet', 'Gentle', 'Calm', 'Warm', 'Steady', 'Soft', 'Kind', 'Bright',
+  'Hidden', 'Patient', 'Wandering', 'Sleepy', 'Curious', 'Brave', 'Mellow',
+  'Drifting', 'Whispering', 'Peaceful', 'Humble', 'Quietly',
+];
+const NOUNS = [
+  'Fox', 'River', 'Owl', 'Willow', 'Harbor', 'Ember', 'Meadow', 'Comet',
+  'Lantern', 'Wave', 'Sparrow', 'Cedar', 'Horizon', 'Pebble', 'Cloud', 'Fern',
+];
+
+function generateUsername() {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  return `${adj} ${noun}`;
+}
+
 const queues = { venter: [], listener: [] };
 const sessions = new Map(); // sessionId -> { listenerId, venterId, startedAt, status }
 const socketToUser = new Map(); // socketId -> { anonId, role, sessionId }
@@ -20,7 +37,7 @@ function cleanQueue(role) {
   queues[role] = queues[role].filter((u) => Date.now() - u.joinedAt < STALE_MS);
 }
 
-function joinQueue(role, socketId, anonId) {
+function joinQueue(role, socketId, anonId, name) {
   const opposite = role === 'venter' ? 'listener' : 'venter';
   cleanQueue(opposite);
   cleanQueue(role);
@@ -31,16 +48,16 @@ function joinQueue(role, socketId, anonId) {
     const session = {
       startedAt: Date.now(),
       status: 'active',
-      [role]: { socketId, anonId },
+      [role]: { socketId, anonId, name },
       [opposite]: partner,
     };
     sessions.set(sessionId, session);
-    socketToUser.set(socketId, { anonId, role, sessionId });
-    socketToUser.set(partner.socketId, { anonId: partner.anonId, role: opposite, sessionId });
-    return { matched: true, sessionId, partnerSocketId: partner.socketId };
+    socketToUser.set(socketId, { anonId, name, role, sessionId });
+    socketToUser.set(partner.socketId, { anonId: partner.anonId, name: partner.name, role: opposite, sessionId });
+    return { matched: true, sessionId, partnerSocketId: partner.socketId, partnerName: partner.name };
   }
 
-  queues[role].push({ socketId, anonId, joinedAt: Date.now() });
+  queues[role].push({ socketId, anonId, name, joinedAt: Date.now() });
   return { matched: false };
 }
 
@@ -71,6 +88,7 @@ function disconnectSocket(socketId) {
 }
 
 module.exports = {
+  generateUsername,
   joinQueue,
   leaveQueue,
   getSession,
