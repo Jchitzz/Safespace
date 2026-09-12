@@ -10,8 +10,11 @@
     reportOpen: false,
     crisisFlagged: false,
     startedAt: null,
+    partnerTyping: false,
   };
   let tickInterval = null;
+  let typingTimeout = null;
+  let isTyping = false;
 
   function render() {
     const app = document.getElementById('app');
@@ -102,6 +105,7 @@
     state.messages = [];
     state.crisisFlagged = false;
     state.startedAt = Date.now();
+    state.partnerTyping = false;
     render();
     tickInterval = setInterval(() => {
       const t = document.getElementById('timer-display');
@@ -111,6 +115,17 @@
 
   socket.on('message', (msg) => {
     state.messages.push(msg);
+    state.partnerTyping = false;
+    renderMessagesOnly();
+  });
+
+  socket.on('partner_typing', () => {
+    state.partnerTyping = true;
+    renderMessagesOnly();
+  });
+
+  socket.on('partner_stopped_typing', () => {
+    state.partnerTyping = false;
     renderMessagesOnly();
   });
 
@@ -163,9 +178,22 @@
     textarea.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(textarea); }
     });
+    textarea.addEventListener('input', handleTypingSignal);
     const sendBtn = el('button', { class: 'send-btn' + (isVenter ? '' : ' listener-mode'), text: 'Send', onclick: () => sendMessage(textarea) });
     container.appendChild(el('div', { class: 'composer' }, [textarea, sendBtn]));
     return container;
+  }
+
+  function handleTypingSignal() {
+    if (!isTyping) {
+      isTyping = true;
+      socket.emit('typing', { sessionId: state.sessionId });
+    }
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+      isTyping = false;
+      socket.emit('stop_typing', { sessionId: state.sessionId });
+    }, 1500);
   }
 
   function renderMessageList(wrap) {
@@ -183,6 +211,14 @@
         'If things feel like too much right now, you can reach the 988 Suicide & Crisis Lifeline by calling or texting 988 or chatting at 988lifeline.org, or the Crisis Text Line by texting HOME to 741741 — all are free and available 24/7.',
       ]));
     }
+    if (state.partnerTyping) {
+      wrap.appendChild(el('div', { class: 'typing-indicator' }, [
+        `${state.partnerName || 'They'} is typing`,
+        el('span', { class: 'typing-dots' }, [
+          el('span', {}), el('span', {}), el('span', {}),
+        ]),
+      ]));
+    }
     wrap.scrollTop = wrap.scrollHeight;
   }
 
@@ -195,6 +231,11 @@
     const text = textarea.value.trim();
     if (!text) return;
     textarea.value = '';
+    clearTimeout(typingTimeout);
+    if (isTyping) {
+      isTyping = false;
+      socket.emit('stop_typing', { sessionId: state.sessionId });
+    }
     socket.emit('send_message', { sessionId: state.sessionId, text });
   }
 

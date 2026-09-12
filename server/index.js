@@ -107,6 +107,20 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('typing', ({ sessionId }) => {
+    const user = matching.getUserBySocket(socket.id);
+    if (!user || user.sessionId !== sessionId) return;
+    const session = matching.getSession(sessionId);
+    if (!session || session.status !== 'active') return;
+    socket.to(sessionId).emit('partner_typing');
+  });
+
+  socket.on('stop_typing', ({ sessionId }) => {
+    const user = matching.getUserBySocket(socket.id);
+    if (!user || user.sessionId !== sessionId) return;
+    socket.to(sessionId).emit('partner_stopped_typing');
+  });
+
   socket.on('end_session', ({ sessionId }) => {
     const session = matching.endSession(sessionId);
     if (session) io.to(sessionId).emit('session_ended', { sessionId, reason: 'ended_by_peer' });
