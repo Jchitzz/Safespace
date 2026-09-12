@@ -10,7 +10,7 @@
   }
 
   let state = {
-    screen: 'landing',
+    screen: 'home',
     role: null,
     sessionId: null,
     messages: [],
@@ -34,7 +34,8 @@
   function render() {
     const app = document.getElementById('app');
     app.innerHTML = '';
-    if (state.screen === 'landing') app.appendChild(renderLanding());
+    if (state.screen === 'home') app.appendChild(renderHome());
+    else if (state.screen === 'landing') app.appendChild(renderLanding());
     else if (state.screen === 'waiting') app.appendChild(renderWaiting());
     else if (state.screen === 'chat') app.appendChild(renderChat());
     else if (state.screen === 'end') app.appendChild(renderEnd());
@@ -42,7 +43,7 @@
       app.appendChild(renderReportModal());
       setupFocusTrap('report-modal', () => { state.reportOpen = false; render(); });
     }
-    if (!state.consentGiven) {
+    if (!state.consentGiven && state.screen !== 'home') {
       app.appendChild(renderConsentModal());
       setupFocusTrap('consent-modal', null); // required acknowledgment — no Escape/backdrop dismiss
     }
@@ -78,6 +79,52 @@
       else if (c) e.appendChild(c);
     });
     return e;
+  }
+
+  const HOME_QUOTES = [
+    "You don't have to have it figured out to be worth talking to.",
+    'Being heard is its own kind of relief.',
+    'Some days, showing up is the whole point.',
+    'You are not a burden for needing to talk.',
+    'Listening is a small thing that means a lot.',
+    "It's okay to take up a few minutes of someone's night.",
+    "The right words matter less than someone actually listening.",
+    'You made it through today. That counts for something.',
+    "Connection doesn't require a reason — just a moment.",
+    'Two strangers, one honest conversation. That can be enough.',
+  ];
+  function pickHomeQuote() {
+    return HOME_QUOTES[Math.floor(Math.random() * HOME_QUOTES.length)];
+  }
+
+  // ---------------- HOME ----------------
+  function renderHome() {
+    return el('div', { class: 'landing home' }, [
+      el('div', { class: 'glow' }),
+      el('div', { class: 'home-content' }, [
+        el('h1', { text: 'safespace' }),
+        el('p', { class: 'tagline', text: 'Anonymous peer support, one conversation at a time.' }),
+        el('div', { class: 'mission' }, [
+          el('h2', { text: 'Why we exist' }),
+          el('p', { text: "Everyone has days they need to talk through, and not everyone has someone to call. safespace closes that gap: a place to say what's on your mind to a real person — no names, no history, no accounts." }),
+          el('p', { text: "Vent when you need to get something off your chest, or listen when you have room to hold space for someone else. It's not therapy or a substitute for professional care — just somewhere to not feel alone with what you're carrying today." }),
+        ]),
+        el('blockquote', { class: 'home-quote', text: pickHomeQuote() }),
+        el('button', { class: 'cta-btn', onclick: () => { state.screen = 'landing'; render(); }, text: 'Start a Conversation' }),
+      ]),
+      el('p', { class: 'footnote' }, [
+        "If you're in crisis (US), call or text 988, or chat at ",
+        el('a', { href: 'https://988lifeline.org/chat', target: '_blank', text: '988lifeline.org' }),
+        ' — or text HOME to 741741 for the ',
+        el('a', { href: 'https://www.crisistextline.org', target: '_blank', text: 'Crisis Text Line' }),
+        '. Outside the US, find a local line at ',
+        el('a', { href: 'https://findahelpline.com', target: '_blank', text: 'findahelpline.com' }),
+        '.',
+      ]),
+      el('div', { class: 'footer-links' }, [
+        el('a', { href: '/terms.html', target: '_blank', text: 'Terms & Privacy' }),
+      ]),
+    ]);
   }
 
   function renderQueueStatus() {
