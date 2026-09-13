@@ -37,7 +37,9 @@ Then open `http://localhost:3000` in two different browser windows (or one norma
 | `PORT` | No | Defaults to 3000. Most hosts (Railway, Render) set this for you. |
 | `REDIS_URL` | No | If set, matching state, sessions, cooldowns, the conversation counter, and the note wall all move to Redis, and Socket.IO's Redis adapter is enabled — this is what makes it safe to run more than one server instance. Without it, everything lives in memory in a single process. |
 | `ADMIN_USER` | No | Username for `/admin/reports`. Defaults to `admin`. |
-| `ADMIN_PASSWORD` | To enable the admin dashboard | If unset, `/admin/reports` is disabled entirely (returns a 503). Set this to turn on the password-protected reports dashboard. |
+| `ADMIN_PASSWORD` | To enable the admin dashboard | If unset, `/admin/reports` and `/admin/bans` are disabled entirely (return a 503). Set this to turn on the password-protected admin dashboards. |
+| `IPQS_API_KEY` | No | Enables VPN/proxy detection via IPQualityScore. Without it, that check is skipped entirely (fails open — never blocks on an unconfigured or failed lookup). |
+| `BLOCK_VPN_TRAFFIC` | No | Set to `true` to actually reject connections flagged as VPN/proxy/Tor (requires `IPQS_API_KEY` to do anything). Off by default — read the "Banning and abuse prevention" section before turning this on. |
 
 ## How matching works
 
@@ -62,6 +64,16 @@ Then open `http://localhost:3000` in two different browser windows (or one norma
 - **A live counter** ("1,204 conversations so far") on the home page, ticking up every time two people are matched.
 - **A breathing-pause screen** shown to venters (not listeners) after a conversation ends, before the rating screen — a brief, skippable moment rather than dropping straight into "rate your experience."
 - **Light/dark theme toggle**, persisted across visits.
+
+## Banning and abuse prevention
+
+- **Automatic**: if the same IP address is reported 3 times within 24 hours, it's automatically banned for 7 days. This threshold and duration are constants at the top of `server/bans.js` if you want to tune them.
+- **Manual**: visit `/admin/bans` (same Basic Auth as the reports dashboard) to see active bans, ban an IP directly, or unban one. The reports dashboard (`/admin/reports`) also has a one-click "Ban IP" form on each row that has a reported IP attached.
+- **Optional VPN/proxy blocking**: set `IPQS_API_KEY` (a free-tier key from [IPQualityScore](https://www.ipqualityscore.com/)) and `BLOCK_VPN_TRAFFIC=true` to reject connections from detected VPNs, proxies, and Tor exit nodes entirely. This is off by default and worth thinking through before enabling — see the honest limitations below.
+
+**Read this before you rely on any of it**: banning an IP stops that IP, not a person. On an anonymous, accountless site there's no persistent identity to actually ban — someone determined enough can switch networks, use a VPN, or reset their connection and come back with a new IP. This raises the cost of returning; it doesn't make it impossible, and no combination of IP + fingerprinting could make it impossible on a site built around anonymity. Enabling `BLOCK_VPN_TRAFFIC` also blocks legitimate privacy-conscious users, not just people evading a ban — that trade is yours to make deliberately, which is why it's off by default.
+
+**Separately, and more importantly**: if a report ever involves apparent child sexual abuse material or exploitation, banning the person is not sufficient and may not even be the priority. U.S. federal law (18 U.S.C. § 2258A) requires electronic service providers to report this to NCMEC's CyberTipline (report.cybertip.org) — this is a legal obligation, not an optional moderation choice. This app's architecture deliberately does not retain conversation content, which is good for privacy but means there'd be nothing to report or preserve if something serious happened. Get real legal guidance before launch on what retention exception (if any) you need for this specific category, and don't treat the ban system in this README as covering that obligation — it doesn't.
 
 ## Admin reports dashboard
 

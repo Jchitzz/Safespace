@@ -67,7 +67,7 @@
       <li>Attempt to record, screenshot, or redistribute a conversation without the other person's consent</li>
       <li>Attempt to disrupt, reverse-engineer, or abuse the underlying service (e.g., spamming, scripting bulk connections)</li>
     </ul>
-    <p>Any user can report a conversation. Reports are reviewed and may result in access being restricted, though as a peer-matching service we cannot guarantee real-time moderation of every conversation.</p>
+    <p>Any user can report a conversation. Reports are reviewed and may result in access being restricted for the associated IP address, either automatically after multiple reports or manually by an administrator, though as a peer-matching service we cannot guarantee real-time moderation of every conversation. We're upfront that IP-based restriction has real limits — it can be bypassed by switching networks or using a VPN — and treat it as one layer of abuse prevention, not a guarantee that a specific person can never return.</p>
   </section>
 
   <section>
@@ -81,8 +81,9 @@
     <ul>
       <li>Each visit is assigned a random, temporary identifier and a randomly generated display name (e.g. "Quiet Fox") that is not linked to your real identity</li>
       <li>Conversation messages are relayed live between the two matched users and are not stored in a database once your session ends</li>
-      <li>If you submit a report, we store the reason, optional details, a timestamp, and which anonymous session it relates to — not the message content or your IP address</li>
-      <li>Standard web server logs (e.g. IP address, browser type) may be temporarily retained by our hosting provider for security and abuse-prevention purposes</li>
+      <li>If you submit a report, we store the reason, optional details, a timestamp, which anonymous session it relates to, and the IP address of the person being reported (not yours, if you're the one reporting) — this is used only to prevent repeat abuse, as described below, not to identify anyone personally</li>
+      <li>We use each participant's IP address at connection time to check it against a list of temporarily or permanently restricted IPs, and to detect when the same IP is being reported repeatedly in a short window. IP addresses are not linked to your anonymous display name, shown to other users, or retained beyond what's needed for this abuse-prevention system</li>
+      <li>Standard web server logs (e.g. IP address, browser type) may be temporarily retained by our hosting provider for security purposes</li>
       <li>We use browser local storage only to remember that you've acknowledged this policy, so you aren't asked again on every visit</li>
     </ul>
   </section>

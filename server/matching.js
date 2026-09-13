@@ -201,8 +201,8 @@ async function finalizeMatch(self, selfRole, partner, partnerRole) {
 }
 
 // role is 'venter', 'listener', or 'flexible' (no preference — match with whoever's around).
-async function joinQueue(role, socketId, anonId, name) {
-  const self = { socketId, anonId, name, joinedAt: Date.now() };
+async function joinQueue(role, socketId, anonId, name, ip) {
+  const self = { socketId, anonId, name, ip, joinedAt: Date.now() };
 
   if (role === 'venter' || role === 'listener') {
     const opposite = role === 'venter' ? 'listener' : 'venter';

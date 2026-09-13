@@ -76,6 +76,13 @@
   let typingTimeout = null;
   let isTyping = false;
 
+  socket.on('banned', ({ reason, expiresAt }) => {
+    state.screen = 'banned';
+    state.banReason = reason || 'This connection has been restricted.';
+    state.banExpiresAt = expiresAt || null;
+    render();
+  });
+
   socket.on('queue_counts', (counts) => {
     state.queueCounts = counts;
     if (state.screen === 'landing') render();
@@ -125,6 +132,7 @@
     else if (state.screen === 'chat') app.appendChild(renderChat());
     else if (state.screen === 'breather') app.appendChild(renderBreather());
     else if (state.screen === 'end') app.appendChild(renderEnd());
+    else if (state.screen === 'banned') app.appendChild(renderBanned());
     if (state.reportOpen) {
       app.appendChild(renderReportModal());
       setupFocusTrap('report-modal', () => { state.reportOpen = false; render(); });
@@ -409,6 +417,18 @@
       el('h2', { text: 'Take a breath before you go.' }),
       el('p', { text: 'Whenever you\u2019re ready.' }),
       el('button', { class: 'again-btn', text: "I'm ready", onclick: () => { state.screen = 'end'; render(); } }),
+    ]);
+  }
+
+  function renderBanned() {
+    const expiry = state.banExpiresAt
+      ? `This restriction lifts on ${new Date(state.banExpiresAt).toLocaleDateString()}.`
+      : '';
+    return el('div', { class: 'breather' }, [
+      el('h2', { text: 'This connection is restricted' }),
+      el('p', { text: state.banReason }),
+      expiry ? el('p', { text: expiry }) : null,
+      el('p', { text: 'If you believe this is a mistake, that happens sometimes with shared networks or VPNs — there isn\u2019t a way to appeal from this screen right now.' }),
     ]);
   }
 
